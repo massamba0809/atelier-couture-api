@@ -7,6 +7,10 @@ services:
       POSTGRES_DB: ${POSTGRES_DB}
     volumes:
       - pgdata:/var/lib/postgresql/data
+    # Accès depuis la machine (alembic, seed, uvicorn en local).
+    # Si le port 5432 est déjà pris, choisir un autre port et l'aligner dans DATABASE_URL.
+    ports:
+      - "${POSTGRES_PORT_HOTE:-5432}:5432"
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
       interval: 5s
