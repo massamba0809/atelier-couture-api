@@ -1,0 +1,16 @@
+# !!! REMPLACEZ ce fichier par le requirements.txt fourni par l'enseignant
+# (versions exactes exigées). Cette liste ne sert qu'à indiquer les
+# bibliothèques utilisées par le squelette, SANS versions.
+fastapi
+uvicorn[standard]
+sqlalchemy
+psycopg[binary]
+alembic
+pydantic
+pydantic-settings
+email-validator
+python-multipart
+argon2-cffi
+PyJWT
+pytest
+httpx
