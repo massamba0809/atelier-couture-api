@@ -1,15 +1,20 @@
 """Règles de gestion des commandes : le cœur du projet.
 
 Ce module contient les fonctions PURES (sans base de données) dont dépendent
-aussi les paiements et les livraisons. Elles sont déjà testées dans
-tests/test_regles_commandes.py. Le reste (création, lignes, changement de
-statut avec historique...) est à ajouter ici, par Massamba.
+aussi les paiements et les livraisons, testées dans tests/test_regles_commandes.py,
+puis les deux fonctions de CONTRAT utilisées par Sine (paiements, livraisons) :
+recalculer_montants et enregistrer_changement_statut, testées dans
+tests/test_commandes_contrat.py. Le reste (création, lignes...) est à ajouter ici.
 """
 from collections.abc import Iterable
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta, timezone
 
-from app.core.errors import Conflit
+from sqlalchemy.orm import Session
+
+from app.core.errors import Conflit, DonneesInvalides
+from app.models.commande import Commande, HistoriqueStatut
 from app.models.enums import Statut
+from app.models.utilisateur import Utilisateur
 
 # Workflow des statuts (section 6 de l'énoncé).
 TRANSITIONS: dict[Statut, set[Statut]] = {
@@ -41,6 +46,12 @@ def verifier_transition(actuel: Statut, nouveau: Statut) -> None:
         )
     if nouveau not in TRANSITIONS[actuel]:
         possibles = ", ".join(sorted(s.value for s in TRANSITIONS[actuel] - {Statut.livree}))
+        if actuel == Statut.terminee:
+            # « terminee » n'est pas un statut final : seule la livraison la fait évoluer.
+            raise Conflit(
+                f"Transition interdite : {actuel.value} → {nouveau.value}. "
+                "Une commande terminée n'évolue que par la confirmation de livraison."
+            )
         if not possibles:
             raise Conflit(
                 f"Transition interdite : {actuel.value} → {nouveau.value}. "
@@ -77,3 +88,67 @@ def est_en_retard(statut: Statut, date_livraison_prevue: date | None, aujourd_hu
     if statut in STATUTS_FINAUX or date_livraison_prevue is None:
         return False
     return date_livraison_prevue < aujourd_hui
+
+
+# --- Contrat avec les paiements et les livraisons (Sine) ----------------------
+# Signatures figées : prévenir l'autre AVANT de les changer (PLAN_DE_TRAVAIL.md, section 3).
+
+
+def recalculer_montants(commande: Commande) -> None:
+    """RG7 : recalcule montant_total et montant_paye à partir des lignes et des paiements.
+
+    total = somme(quantité × prix unitaire) − remise ; payé = somme des paiements ;
+    le solde (commande.solde) s'en déduit.
+
+    Lit les collections commande.lignes et commande.paiements : ajouter ou retirer
+    par ces listes (commande.paiements.append(p), commande.paiements.remove(p)),
+    pas seulement avec db.add / db.delete, sinon le calcul ne les voit pas.
+
+    Ne modifie rien si une règle est violée :
+    - remise supérieure à la somme des prestations → DonneesInvalides (422) ;
+    - total ramené sous le montant déjà payé → Conflit (409).
+    """
+    sous_total = calculer_total(((lg.quantite, lg.prix_unitaire) for lg in commande.lignes), 0)
+    remise = commande.remise or 0
+    if remise > sous_total:
+        raise DonneesInvalides(
+            f"La remise ({remise} FCFA) dépasse la somme des prestations ({sous_total} FCFA)."
+        )
+    total = sous_total - remise
+    paye = sum(p.montant for p in commande.paiements)
+    if total < paye:
+        raise Conflit(
+            f"Le total de la commande ({total} FCFA) ne peut pas être inférieur "
+            f"au montant déjà payé ({paye} FCFA)."
+        )
+    commande.montant_total = total
+    commande.montant_paye = paye
+
+
+def enregistrer_changement_statut(
+    db: Session,
+    commande: Commande,
+    nouveau: Statut,
+    commentaire: str | None,
+    utilisateur: Utilisateur,
+) -> HistoriqueStatut:
+    """RG15 : pose le nouveau statut et écrit la ligne d'historique correspondante.
+
+    La première ligne d'une commande (à sa création) a un ancien statut vide.
+    Ne vérifie PAS le workflow : la route 28 appelle verifier_transition avant,
+    la confirmation de livraison (RG20) pose « livree » directement.
+    """
+    ancien = commande.statut if commande.historique else None
+    ligne = HistoriqueStatut(
+        ancien_statut=ancien,
+        nouveau_statut=nouveau,
+        commentaire=commentaire,
+        utilisateur_id=utilisateur.id,
+        # Heure Python plutôt que now() SQL : sous PostgreSQL, now() est la même
+        # pour toute la transaction, ce qui mélangerait l'ordre de l'historique.
+        date_changement=datetime.now(timezone.utc),
+    )
+    commande.statut = nouveau
+    commande.historique.append(ligne)
+    db.flush()
+    return ligne
