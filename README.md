@@ -81,4 +81,17 @@ scripts/avancement.py   routes réalisées sur les 44
 
 ## Décisions de conception
 
-À compléter (voir la section 2 de `docs/PLAN_DE_TRAVAIL.md`).
+Points de l'énoncé ambigus ou contradictoires, tranchés par le binôme :
+
+| Sujet | Décision |
+|---|---|
+| Connexion | Par e-mail (route 1 : `username` = e-mail) : le modèle `Utilisateur` n'a pas de téléphone, contrairement à ce que suggère la section 4. |
+| Numéro de commande (RG5) | `CMD-AAAA-NNNNN`, où `NNNNN` est l'`id` de la commande en base. |
+| Création / modification d'un client | Ouvertes à tous les rôles, conformément au tableau des routes (7 et 10). |
+| Annulation par le tailleur (route 28) | La route est ouverte à tous ; le refus (403, RG14) est fait dans le service. |
+| « Encaissé » (statistiques) | Inclut les paiements des commandes annulées : l'argent a bien été reçu (remboursement géré hors API). |
+| Livraison avec solde impayé (RG19) | L'historique reçoit la mention « Livré avec solde impayé de X FCFA ». |
+| Confirmation de livraison (route 37) | Renvoie la livraison ; la commande passe à `livree` (consultable par la route 26). |
+| Date de livraison prévue (route 35) | Refusée si elle précède la date de commande (422), par cohérence avec RG8. |
+| Dernières mesures (RG3) | Date de prise la plus récente ; à date égale, la dernière saisie (plus grand `id`). |
+| Statistiques | `nb_commandes_mois` exclut les commandes annulées ; `livraisons_du_jour` compte les livraisons planifiées pour aujourd'hui ; granularité par défaut : `jour`. |
