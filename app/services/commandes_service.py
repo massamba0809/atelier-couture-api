@@ -4,17 +4,26 @@ Ce module contient les fonctions PURES (sans base de données) dont dépendent
 aussi les paiements et les livraisons, testées dans tests/test_regles_commandes.py,
 puis les deux fonctions de CONTRAT utilisées par Sine (paiements, livraisons) :
 recalculer_montants et enregistrer_changement_statut, testées dans
-tests/test_commandes_contrat.py. Le reste (création, lignes...) est à ajouter ici.
+tests/test_commandes_contrat.py. Enfin, les routes 24 à 26 (création, liste, détail).
 """
 from collections.abc import Iterable
 from datetime import date, datetime, timedelta, timezone
+from typing import Any
+from uuid import uuid4
 
-from sqlalchemy.orm import Session
+from sqlalchemy import and_, not_, select
+from sqlalchemy.orm import Session, selectinload
 
-from app.core.errors import Conflit, DonneesInvalides
-from app.models.commande import Commande, HistoriqueStatut
+from app.core.errors import Conflit, DonneesInvalides, Introuvable
+from app.models.commande import Commande, HistoriqueStatut, LigneCommande
 from app.models.enums import Statut
+from app.models.mesure import Mesure
 from app.models.utilisateur import Utilisateur
+from app.schemas.commande import CommandeCreate
+from app.services.catalogue_service import obtenir_prestation
+from app.services.clients_service import obtenir_client
+from app.services.mesures_service import dernieres_mesures
+from app.services.pagination import paginer
 
 # Workflow des statuts (section 6 de l'énoncé).
 TRANSITIONS: dict[Statut, set[Statut]] = {
@@ -152,3 +161,159 @@ def enregistrer_changement_statut(
     commande.historique.append(ligne)
     db.flush()
     return ligne
+
+
+# --- Routes 24 à 26 : création, liste, détail ---------------------------------
+
+
+def obtenir_commande(db: Session, commande_id: int) -> Commande:
+    commande = db.get(Commande, commande_id)
+    if commande is None:
+        raise Introuvable(f"Commande {commande_id} introuvable.")
+    return commande
+
+
+def _choisir_mesure(db: Session, client_id: int, mesure_id: int | None) -> int | None:
+    """RG9 : mesures du client de la commande (422) ; par défaut ses dernières, s'il en a."""
+    if mesure_id is None:
+        derniere = dernieres_mesures(db, client_id)
+        return derniere.id if derniere else None
+    mesure = db.get(Mesure, mesure_id)
+    if mesure is None or mesure.client_id != client_id:
+        raise DonneesInvalides(
+            f"La prise de mesures {mesure_id} n'appartient pas au client {client_id}."
+        )
+    return mesure.id
+
+
+def creer_commande(db: Session, donnees: CommandeCreate, auteur: Utilisateur) -> Commande:
+    """Route 24 : RG5, RG6, RG7, RG8, RG9, RG15. Statut initial en_attente."""
+    client = obtenir_client(db, donnees.client_id)  # 404 si inconnu
+    aujourd_hui = date.today()
+
+    lignes, delais = [], []
+    for ligne in donnees.lignes:
+        prestation = obtenir_prestation(db, ligne.type_vetement_id)  # 404 si inconnue
+        if not prestation.actif:  # RG6
+            raise DonneesInvalides(
+                f"La prestation « {prestation.nom} » n'est plus proposée : elle ne peut pas être commandée."
+            )
+        prix = prestation.prix_base if ligne.prix_unitaire is None else ligne.prix_unitaire  # RG6
+        lignes.append(LigneCommande(
+            type_vetement_id=prestation.id, quantite=ligne.quantite,
+            prix_unitaire=prix, description=ligne.description,
+        ))
+        delais.append(prestation.delai_jours)
+
+    date_prevue = donnees.date_livraison_prevue or date_livraison_par_defaut(aujourd_hui, delais)  # RG8
+    if date_prevue < aujourd_hui:
+        raise DonneesInvalides(
+            f"La date de livraison prévue ({date_prevue}) ne peut pas précéder la date de commande ({aujourd_hui})."
+        )
+
+    commande = Commande(
+        numero=f"TMP-{uuid4().hex[:16]}",  # remplacé après le flush, une fois l'id connu (RG5)
+        client_id=client.id,
+        mesure_id=_choisir_mesure(db, client.id, donnees.mesure_id),  # RG9
+        date_commande=aujourd_hui,
+        date_livraison_prevue=date_prevue,
+        remise=donnees.remise,
+        notes=donnees.notes,
+        cree_par_id=auteur.id,
+    )
+    commande.lignes.extend(lignes)
+    recalculer_montants(commande)  # RG7 : 422 si la remise dépasse les prestations
+    db.add(commande)
+    db.flush()
+    commande.numero = formater_numero(aujourd_hui.year, commande.id)  # RG5
+    enregistrer_changement_statut(db, commande, Statut.en_attente, None, auteur)  # RG15
+    return commande
+
+
+def _condition_en_retard(aujourd_hui: date):
+    """RG11 en SQL, même définition que est_en_retard."""
+    return and_(
+        Commande.date_livraison_prevue < aujourd_hui,
+        Commande.statut.not_in(list(STATUTS_FINAUX)),
+    )
+
+
+def lister_commandes(
+    db: Session,
+    *,
+    statut: Statut | None = None,
+    client_id: int | None = None,
+    en_retard: bool | None = None,
+    date_min: date | None = None,
+    date_max: date | None = None,
+    numero: str | None = None,
+    limit: int,
+    offset: int,
+) -> dict[str, Any]:
+    """Route 25 : la plus récente d'abord. date_min / date_max portent sur la date de commande."""
+    requete = select(Commande).options(selectinload(Commande.client))
+    if statut is not None:
+        requete = requete.where(Commande.statut == statut)
+    if client_id is not None:
+        requete = requete.where(Commande.client_id == client_id)
+    if en_retard is not None:
+        condition = _condition_en_retard(date.today())
+        requete = requete.where(condition if en_retard else not_(condition))
+    if date_min is not None:
+        requete = requete.where(Commande.date_commande >= date_min)
+    if date_max is not None:
+        requete = requete.where(Commande.date_commande <= date_max)
+    if numero:
+        requete = requete.where(Commande.numero.ilike(f"%{numero.strip()}%"))
+    requete = requete.order_by(Commande.date_commande.desc(), Commande.id.desc())
+    page = paginer(db, requete, limit, offset)
+    page["items"] = [vue_resume(c) for c in page["items"]]
+    return page
+
+
+# --- Vues renvoyées par les routes (champs calculés) --------------------------
+
+
+def vue_resume(commande: Commande) -> dict[str, Any]:
+    """Champs de CommandeResume : ajoute client_nom, solde et en_retard (RG11)."""
+    return {
+        "id": commande.id,
+        "numero": commande.numero,
+        "client_id": commande.client_id,
+        "client_nom": f"{commande.client.prenom} {commande.client.nom}",
+        "statut": commande.statut,
+        "date_commande": commande.date_commande,
+        "date_livraison_prevue": commande.date_livraison_prevue,
+        "montant_total": commande.montant_total,
+        "montant_paye": commande.montant_paye,
+        "solde": commande.solde,
+        "en_retard": est_en_retard(commande.statut, commande.date_livraison_prevue, date.today()),
+    }
+
+
+def vue_detail(commande: Commande) -> dict[str, Any]:
+    """Champs de CommandeRead : lignes (nom de la prestation, sous-total), paiements, livraison."""
+    return {
+        **vue_resume(commande),
+        "mesure_id": commande.mesure_id,
+        "date_livraison_reelle": commande.date_livraison_reelle,
+        "remise": commande.remise,
+        "notes": commande.notes,
+        "cree_par_id": commande.cree_par_id,
+        "created_at": commande.created_at,
+        "updated_at": commande.updated_at,
+        "lignes": [
+            {
+                "id": lg.id,
+                "type_vetement_id": lg.type_vetement_id,
+                "type_vetement_nom": lg.type_vetement.nom,
+                "description": lg.description,
+                "quantite": lg.quantite,
+                "prix_unitaire": lg.prix_unitaire,
+                "sous_total": lg.quantite * lg.prix_unitaire,
+            }
+            for lg in commande.lignes
+        ],
+        "paiements": list(commande.paiements),
+        "livraison": commande.livraison,
+    }
