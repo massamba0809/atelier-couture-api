@@ -55,8 +55,15 @@ L'administrateur est créé par `python -m app.seed` à partir des variables `AD
 | Rôle | E-mail | Mot de passe |
 |---|---|---|
 | admin | _(valeur de `ADMIN_EMAIL`)_ | _(valeur de `ADMIN_PASSWORD`)_ |
-| accueil | _à créer_ | _à compléter_ |
-| tailleur | _à créer_ | _à compléter_ |
+| accueil | `accueil@atelier.sn` | `accueil123` |
+| tailleur | `tailleur@atelier.sn` | `tailleur123` |
+
+Pour créer les deux comptes de démonstration : se connecter en admin dans Swagger (**Authorize**), puis `POST /api/v1/utilisateurs` avec :
+
+```json
+{"email": "accueil@atelier.sn", "nom_complet": "Awa Accueil", "mot_de_passe": "accueil123", "role": "accueil"}
+{"email": "tailleur@atelier.sn", "nom_complet": "Mamadou Tailleur", "mot_de_passe": "tailleur123", "role": "tailleur"}
+```
 
 ## Organisation du code
 
@@ -77,7 +84,22 @@ scripts/avancement.py   routes réalisées sur les 44
 
 ## Routes réalisées
 
-À compléter en fin de projet : `python -m scripts.avancement` affiche l'état en direct.
+**Les 44 routes de l'énoncé sont réalisées et testées** (`python -m scripts.avancement` affiche l'état en direct).
+
+| Domaine | Routes | Règles | Responsable |
+|---|---|---|---|
+| Authentification | 1-2 | RG22, RG23 | Massamba |
+| Utilisateurs | 3-6 | RG21, RG24 | Massamba |
+| Clients | 7-13 | RG1, RG4 | Massamba |
+| Catalogue | 14-17 | — | Massamba |
+| Mesures | 18-23 | RG2, RG3, RG4 | Sine |
+| Commandes | 24-31 | RG5 à RG15 | Massamba |
+| Paiements | 32-34 | RG16, RG17 | Sine |
+| Livraisons | 35-38 | RG18, RG19, RG20 | Sine |
+| Statistiques | 39-43 | Indicateurs de la section 6 | Sine |
+| Santé | 44 | — | Sine |
+
+Le détail route par route et règle par règle est dans [`docs/SUIVI.md`](docs/SUIVI.md).
 
 ## Décisions de conception
 
@@ -95,3 +117,4 @@ Points de l'énoncé ambigus ou contradictoires, tranchés par le binôme :
 | Date de livraison prévue (route 35) | Refusée si elle précède la date de commande (422), par cohérence avec RG8. |
 | Dernières mesures (RG3) | Date de prise la plus récente ; à date égale, la dernière saisie (plus grand `id`). |
 | Statistiques | `nb_commandes_mois` exclut les commandes annulées ; `livraisons_du_jour` compte les livraisons planifiées pour aujourd'hui ; granularité par défaut : `jour`. |
+| `requirements.txt` | Aucun fichier fourni par l'enseignant : versions exactes figées par le binôme (Python 3.12). |
