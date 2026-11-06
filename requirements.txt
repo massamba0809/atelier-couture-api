@@ -1,16 +1,26 @@
-# !!! REMPLACEZ ce fichier par le requirements.txt fourni par l'enseignant
-# (versions exactes exigées). Cette liste ne sert qu'à indiquer les
-# bibliothèques utilisées par le squelette, SANS versions.
-fastapi
-uvicorn[standard]
-sqlalchemy
-psycopg[binary]
-alembic
-pydantic
-pydantic-settings
-email-validator
-python-multipart
-argon2-cffi
-PyJWT
-pytest
-httpx
+# Versions exactes (section 9 de l'énoncé). Python 3.12 (voir Dockerfile).
+# Aucune liste n'a été fournie par l'enseignant : ce sont les versions avec
+# lesquelles toute la suite de tests passe.
+
+# API
+fastapi==0.162.0
+uvicorn[standard]==0.54.0
+python-multipart==0.0.33
+
+# Base de données
+SQLAlchemy==2.1.6
+psycopg[binary]==3.3.7
+alembic==1.20.1
+
+# Validation et configuration
+pydantic==2.14.2
+pydantic-settings==2.16.2
+email-validator==2.3.0
+
+# Sécurité (RG21, RG22)
+argon2-cffi==25.1.0
+PyJWT==2.15.1
+
+# Tests
+pytest==9.2.0
+httpx==0.28.1
