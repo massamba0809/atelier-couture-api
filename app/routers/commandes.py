@@ -1,9 +1,8 @@
 """Routes 24 à 31 : commandes. Responsable : Massamba. RG5 à RG15.
 
 Schémas : app/schemas/commande.py. Logique : app/services/commandes_service.py.
-Fait : 24 (création, accueil), 25 (liste), 26 (détail).
-TODO : PATCH /commandes/{id}, POST /commandes/{id}/statut, GET /commandes/{id}/historique,
-POST /commandes/{id}/lignes, DELETE /commandes/{id}/lignes/{ligne_id}.
+Accueil (et admin) : créer, modifier, gérer les lignes. Tous : consulter et changer
+le statut (le service applique RG13 et RG14 : le tailleur ne peut pas annuler).
 """
 from datetime import date
 
@@ -14,7 +13,15 @@ from app.core.database import get_db
 from app.core.deps import get_current_user, require_roles
 from app.models.enums import Role, Statut
 from app.models.utilisateur import Utilisateur
-from app.schemas.commande import CommandeCreate, CommandeRead, CommandeResume
+from app.schemas.commande import (
+    ChangementStatut,
+    CommandeCreate,
+    CommandeRead,
+    CommandeResume,
+    CommandeUpdate,
+    HistoriqueRead,
+    LigneCreate,
+)
 from app.schemas.common import Page, Pagination
 from app.services import commandes_service
 
@@ -57,3 +64,60 @@ def obtenir(
     db: Session = Depends(get_db),
 ):
     return commandes_service.vue_detail(commandes_service.obtenir_commande(db, commande_id))
+
+
+@router.patch("/{commande_id}", response_model=CommandeRead)
+def modifier(
+    commande_id: int,
+    donnees: CommandeUpdate,
+    _: Utilisateur = Depends(require_roles(Role.accueil)),
+    db: Session = Depends(get_db),
+):
+    commande = commandes_service.modifier_commande(db, commande_id, donnees)
+    db.commit()
+    return commandes_service.vue_detail(commande)
+
+
+@router.post("/{commande_id}/statut", response_model=CommandeRead)
+def changer_statut(
+    commande_id: int,
+    donnees: ChangementStatut,
+    user: Utilisateur = Depends(get_current_user),  # tous ; RG14 vérifiée dans le service
+    db: Session = Depends(get_db),
+):
+    commande = commandes_service.changer_statut(db, commande_id, donnees, user)
+    db.commit()
+    return commandes_service.vue_detail(commande)
+
+
+@router.get("/{commande_id}/historique", response_model=list[HistoriqueRead])
+def historique(
+    commande_id: int,
+    _: Utilisateur = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    return commandes_service.lister_historique(db, commande_id)
+
+
+@router.post("/{commande_id}/lignes", response_model=CommandeRead, status_code=status.HTTP_201_CREATED)
+def ajouter_ligne(
+    commande_id: int,
+    donnees: LigneCreate,
+    _: Utilisateur = Depends(require_roles(Role.accueil)),
+    db: Session = Depends(get_db),
+):
+    commande = commandes_service.ajouter_ligne(db, commande_id, donnees)
+    db.commit()
+    return commandes_service.vue_detail(commande)
+
+
+@router.delete("/{commande_id}/lignes/{ligne_id}", response_model=CommandeRead)
+def retirer_ligne(
+    commande_id: int,
+    ligne_id: int,
+    _: Utilisateur = Depends(require_roles(Role.accueil)),
+    db: Session = Depends(get_db),
+):
+    commande = commandes_service.retirer_ligne(db, commande_id, ligne_id)
+    db.commit()
+    return commandes_service.vue_detail(commande)
