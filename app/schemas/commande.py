@@ -6,7 +6,7 @@ commandes_service (vue_resume, vue_detail) : ces schémas ne font que décrire l
 from datetime import date, datetime
 from typing import Annotated
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, StringConstraints, field_validator
 
 from app.models.enums import ModeLivraison, Statut, StatutLivraison
 from app.schemas.paiement import PaiementRead
@@ -32,6 +32,43 @@ class CommandeCreate(BaseModel):
     remise: Montant = 0
     date_livraison_prevue: date | None = None
     notes: str | None = None
+
+
+class CommandeUpdate(BaseModel):
+    """Route 27 (PATCH) : seuls les champs envoyés changent. mesure_id et notes peuvent être vidés."""
+
+    mesure_id: int | None = None
+    date_livraison_prevue: date | None = None
+    remise: Montant | None = None
+    notes: str | None = None
+
+    @field_validator("date_livraison_prevue", "remise")
+    @classmethod
+    def non_nul(cls, valeur):
+        # Appelé seulement pour les champs envoyés : un null explicite est refusé (422).
+        if valeur is None:
+            raise ValueError("ne peut pas être vide")
+        return valeur
+
+
+class ChangementStatut(BaseModel):
+    """Route 28. Le commentaire est obligatoire pour annuler une commande qui a reçu un acompte (RG14)."""
+
+    statut: Statut
+    commentaire: Annotated[str, StringConstraints(strip_whitespace=True)] | None = None
+
+
+class HistoriqueRead(BaseModel):
+    """Route 29 : une ligne de l'historique des statuts (RG15)."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    ancien_statut: Statut | None
+    nouveau_statut: Statut
+    commentaire: str | None
+    utilisateur_id: int
+    date_changement: datetime
 
 
 class LigneRead(BaseModel):
