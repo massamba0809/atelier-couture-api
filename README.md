@@ -62,10 +62,20 @@ L'administrateur est créé par `python -m app.seed` à partir des variables `AD
 | Rôle | E-mail | Mot de passe |
 |---|---|---|
 | admin | `admin@atelier.sn` (valeur de `ADMIN_EMAIL`) | `changez-moi-aussi` (valeur de `ADMIN_PASSWORD`) |
-| accueil | `accueil@atelier.sn` | `accueil1234` |
-| tailleur | `tailleur@atelier.sn` | `tailleur1234` |
+| accueil | `accueil@atelier.sn` | `accueil123` |
+| tailleur | `tailleur@atelier.sn` | `tailleur123` |
 
-Création des deux comptes (API démarrée, valeurs de `.env.example`) :
+**Dans Swagger** (le plus simple) : se connecter en admin avec le bouton **Authorize** (`username` = e-mail), puis appeler `POST /api/v1/utilisateurs` une fois avec chacun de ces corps :
+
+```json
+{"email": "accueil@atelier.sn", "nom_complet": "Awa Accueil", "mot_de_passe": "accueil123", "role": "accueil"}
+```
+
+```json
+{"email": "tailleur@atelier.sn", "nom_complet": "Mamadou Tailleur", "mot_de_passe": "tailleur123", "role": "tailleur"}
+```
+
+**En ligne de commande** (API démarrée, valeurs de `.env.example`) :
 
 ```bash
 TOKEN=$(curl -s -X POST localhost:8000/api/v1/auth/login \
@@ -75,11 +85,9 @@ TOKEN=$(curl -s -X POST localhost:8000/api/v1/auth/login \
 for role in accueil tailleur; do
   curl -s -X POST localhost:8000/api/v1/utilisateurs \
     -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
-    -d "{\"email\": \"$role@atelier.sn\", \"nom_complet\": \"Compte $role\", \"mot_de_passe\": \"${role}1234\", \"role\": \"$role\"}"
+    -d "{\"email\": \"$role@atelier.sn\", \"nom_complet\": \"Compte $role\", \"mot_de_passe\": \"${role}123\", \"role\": \"$role\"}"
 done
 ```
-
-Dans Swagger (`/docs`), le bouton **Authorize** accepte directement l'e-mail et le mot de passe (`username` = e-mail).
 
 ## Organisation du code
 
@@ -100,7 +108,22 @@ scripts/avancement.py   routes réalisées sur les 44
 
 ## Routes réalisées
 
-**Les 44 routes sont réalisées.** `python -m scripts.avancement` affiche l'état en direct. Les chemins sont préfixés par `/api/v1`, sauf `/health`.
+**Les 44 routes de l'énoncé sont réalisées et testées.** `python -m scripts.avancement` affiche l'état en direct.
+
+| Domaine | Routes | Règles | Responsable |
+|---|---|---|---|
+| Authentification | 1-2 | RG22, RG23 | Massamba |
+| Utilisateurs | 3-6 | RG21, RG24 | Massamba |
+| Clients | 7-13 | RG1, RG4 | Massamba |
+| Catalogue | 14-17 | — | Massamba |
+| Mesures | 18-23 | RG2, RG3, RG4 | Sine |
+| Commandes | 24-31 | RG5 à RG15 | Massamba |
+| Paiements | 32-34 | RG16, RG17 | Sine |
+| Livraisons | 35-38 | RG18, RG19, RG20 | Sine |
+| Statistiques | 39-43 | Indicateurs de la section 6 | Sine |
+| Santé | 44 | — | Sine |
+
+Détail route par route (chemins préfixés par `/api/v1`, sauf `/health`) ; règle par règle dans [`docs/SUIVI.md`](docs/SUIVI.md) :
 
 | N° | Méthode | Chemin | Rôle | Palier | Responsable |
 |---:|---|---|---|:-:|---|
